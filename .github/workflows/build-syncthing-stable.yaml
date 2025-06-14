@@ -1,83 +1,47 @@
-name: Build Syncthing Custom
+name: 构建 Syncthing 稳定版
 
+# 当推送到主分支、发布分支或创建标签时触发
 on:
-  # 手动触发
-  workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'Release tag name (e.g., v1.27.0-custom)'
-        required: false
-        default: ''
-  # 推送到主分支时触发
   push:
-    branches: [ main, master ]
+    branches: [ "main", "release*" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
 
+# 设置环境变量
 env:
-  # Go 版本设置
-  GO_VERSION: "~1.22.0"
-  
-  # 优化兼容性设置
-  GO386: softfloat
-  GOARM: "5"
+  GO_VERSION: "~1.24.0"  # Go 版本
   GOMIPS: softfloat
-  
-  # 构建元数据
+  LOGGER_DISCARD: "1"
   BUILD_USER: builder
-  BUILD_HOST: github.actions
+  BUILD_HOST: github.syncthing.net
+  TAGS: "netgo osusergo sqlite_omit_load_extension"
 
 jobs:
-  # 构建多平台版本
-  build-cross-platform:
-    name: Build cross platform
+  build:
+    name: 构建二进制文件
     runs-on: ubuntu-latest
+    
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          # Linux 平台
-          - goos: linux
-            goarch: amd64
-            suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
-          - goos: linux
-            goarch: arm
-            suffix: linux-arm
-          - goos: linux
-            goarch: 386
-            suffix: linux-386
-          # Windows 平台  
-          - goos: windows
-            goarch: amd64
-            suffix: windows-amd64
-          - goos: windows
-            goarch: arm64
-            suffix: windows-arm64
-          - goos: windows
-            goarch: 386
-            suffix: windows-386
-          # macOS 平台
-          - goos: darwin
-            goarch: amd64
-            suffix: macos-amd64
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+        exclude:
+          # 暂时排除一些不常用的架构组合
           - goos: darwin
             goarch: arm64
-            suffix: macos-arm64
-          # FreeBSD 平台
-          - goos: freebsd
-            goarch: amd64
-            suffix: freebsd-amd64
-          - goos: freebsd
-            goarch: arm64
-            suffix: freebsd-arm64
     
     steps:
-      - name: Checkout current source
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
+          # 获取完整的 Git 历史记录，这对版本构建很重要
           fetch-depth: 0
+          ref: ${{ github.ref }}
 
-      - name: Setup Go
+      - name: 设置 Go 环境
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -86,153 +50,167 @@ jobs:
 
       - name: Build binary
         run: |
-          # 构建 - 使用 -goos 和 -goarch 参数而不是环境变量
-          go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build syncthing
+          # 获取版本信息 - 确保使用 tag 版本而不是 commit hash
+          if [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # 如果是 tag 触发，提取 tag 版本
+            VERSION_TAG=${GITHUB_REF#refs/tags/}
+            echo "Building tagged version: $VERSION_TAG"
+            go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} -version "$VERSION_TAG" build syncthing
+          else
+            # 非 tag 触发，使用默认版本获取方式
+            VERSION_INFO=$(go run build.go version)
+            echo "Building development version: $VERSION_INFO"
+            
+            # 验证版本格式 - 确保不是单纯的 commit hash
+            if [[ "$VERSION_INFO" =~ ^[0-9a-f]{8,40}$ ]]; then
+              echo "Error: Version appears to be just a commit hash: $VERSION_INFO"
+              echo "Expected format like: v1.2.3 or v1.2.3-dev.X.gABCDEF"
+              exit 1
+            fi
+            
+            go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build syncthing
+          fi
           
           # 重命名二进制文件
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            mv syncthing.exe syncthing-${{ matrix.suffix }}.exe
-            BINARY_NAME="syncthing-${{ matrix.suffix }}.exe"
+            BINARY_NAME="syncthing-${{ matrix.goos }}-${{ matrix.goarch }}.exe"
+            mv syncthing.exe $BINARY_NAME
           else
-            mv syncthing syncthing-${{ matrix.suffix }}
-            BINARY_NAME="syncthing-${{ matrix.suffix }}"
+            BINARY_NAME="syncthing-${{ matrix.goos }}-${{ matrix.goarch }}"
+            mv syncthing $BINARY_NAME
           fi
           
           # 输出文件信息
           ls -la $BINARY_NAME
           echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
 
-      - name: Upload artifacts
+      - name: 验证二进制文件
+        run: |
+          # 检查文件是否存在且可执行
+          if [ ! -f "$BINARY_NAME" ]; then
+            echo "Error: Binary file $BINARY_NAME not found"
+            exit 1
+          fi
+          
+          # 输出文件大小
+          echo "Binary size: $(stat -c%s $BINARY_NAME) bytes"
+          
+          # 验证版本信息（仅对当前平台的二进制文件）
+          if [ "${{ matrix.goos }}" = "linux" ] && [ "${{ matrix.goarch }}" = "amd64" ]; then
+            echo "Verifying version information..."
+            chmod +x $BINARY_NAME
+            ./$BINARY_NAME --version
+          fi
+
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: syncthing-${{ matrix.suffix }}
-          path: syncthing-${{ matrix.suffix }}*
-          retention-days: 7
+          name: syncthing-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: syncthing-${{ matrix.goos }}-${{ matrix.goarch }}*
+          retention-days: 30
+          if-no-files-found: error
 
-  # 创建 Release
-  create-release:
-    name: Create Release
-    needs: [build-cross-platform]
+  # 创建发布（仅当推送标签时）
+  release:
+    name: 创建 GitHub 发布
+    needs: build
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
     steps:
-      - name: Checkout current source
+      - name: 检出代码
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
-          check-latest: true
 
-      - name: Get version info
-        id: version
-        run: |
-          # 获取当前代码的版本信息
-          VERSION=$(go run build.go version)
-          echo "Current version: $VERSION"
-          
-          # 如果手动指定了 release tag，使用指定的
-          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
-            RELEASE_TAG="${{ github.event.inputs.release_tag }}"
-          else
-            # 使用当前版本加上时间戳
-            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            RELEASE_TAG="$VERSION-$TIMESTAMP"
-          fi
-          
-          echo "Release tag: $RELEASE_TAG"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
-
-      - name: Download all artifacts
+      - name: 下载所有构建产物
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: ./artifacts
 
-      - name: Prepare release files
+      - name: 准备发布文件
         run: |
-          mkdir -p release-files
+          # 创建发布目录
+          mkdir -p release
           
-          # 移动所有构建文件到 release-files 目录
-          find artifacts -name "syncthing-*" -type f -exec cp {} release-files/ \;
+          # 移动所有二进制文件到发布目录
+          find ./artifacts -name "syncthing-*" -type f -exec mv {} release/ \;
           
-          # 创建校验和文件
-          cd release-files
-          sha256sum syncthing-* > sha256sum.txt
-          ls -la
+          # 列出发布文件
+          echo "Release files:"
+          ls -la release/
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: 提取变更日志
+        id: changelog
+        run: |
+          # 获取标签名
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          
+          # 生成简单的变更日志
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "## Syncthing $TAG_NAME" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 构建信息" >> $GITHUB_OUTPUT
+          echo "- 构建时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
+          echo "- 提交: ${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "- 分支: ${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### 支持的平台" >> $GITHUB_OUTPUT
+          echo "- Linux (amd64, arm64)" >> $GITHUB_OUTPUT
+          echo "- Windows (amd64, arm64)" >> $GITHUB_OUTPUT
+          echo "- macOS (amd64)" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 创建 GitHub 发布
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.version.outputs.release_tag }}
-          name: Syncthing Custom ${{ steps.version.outputs.release_tag }}
-          body: |
-            ## Syncthing Custom Build ${{ steps.version.outputs.release_tag }}
-            
-            这是基于当前代码的自定义构建版本。
-            
-            **基础版本**: ${{ steps.version.outputs.version }}  
-            **构建时间**: ${{ github.run_id }}  
-            **提交哈希**: ${{ github.sha }}
-            
-            ### 支持的平台
-            - Linux (amd64, arm64, arm, 386)
-            - Windows (amd64, arm64, 386)  
-            - macOS (amd64, arm64)
-            - FreeBSD (amd64, arm64)
-            
-            ### 下载说明
-            - 下载对应您系统架构的二进制文件
-            - Linux/macOS 用户请给文件添加执行权限：`chmod +x syncthing-*`
-            - 校验文件完整性请参考 `sha256sum.txt`
-            
-            ### 源码
-            基于提交: ${{ github.sha }}
+          tag_name: ${{ steps.changelog.outputs.tag_name }}
+          release_name: Syncthing ${{ steps.changelog.outputs.tag_name }}
+          body: ${{ steps.changelog.outputs.changelog }}
           draft: false
-          prerelease: true
-          files: release-files/*
+          prerelease: ${{ contains(steps.changelog.outputs.tag_name, 'rc') || contains(steps.changelog.outputs.tag_name, 'beta') || contains(steps.changelog.outputs.tag_name, 'alpha') }}
+
+      - name: 上传发布文件
+        run: |
+          # 安装 GitHub CLI（如果没有）
+          if ! command -v gh &> /dev/null; then
+            echo "Installing GitHub CLI..."
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+          
+          # 上传所有二进制文件
+          for file in release/*; do
+            if [ -f "$file" ]; then
+              echo "Uploading $file..."
+              gh release upload ${{ steps.changelog.outputs.tag_name }} "$file"
+            fi
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 构建 Docker 镜像（可选）
-  build-docker:
-    name: Build Docker Image
-    needs: [build-cross-platform]
+  # 总结作业
+  summary:
+    name: 构建总结
+    needs: [build]
     runs-on: ubuntu-latest
+    if: always()
+    
     steps:
-      - name: Checkout current source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-          check-latest: true
-
-      - name: Build for Docker (multi-arch)
+      - name: 显示构建状态
         run: |
-          # 构建多架构的二进制文件用于 Docker
-          for arch in amd64 arm64 arm; do
-            echo "Building for linux/$arch"
-            go run build.go -goos linux -goarch $arch build syncthing
-            mv syncthing syncthing-linux-$arch
-          done
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image (local)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: false
-          tags: |
-            syncthing-custom:latest
-            syncthing-custom:dev 
+          echo "## 构建总结"
+          echo "构建作业状态: ${{ needs.build.result }}"
+          
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "✅ 所有平台构建成功"
+          else
+            echo "❌ 构建失败或被取消"
+          fi
+          
+          echo "触发事件: ${{ github.event_name }}"
+          echo "引用: ${{ github.ref }}"
+          echo "提交: ${{ github.sha }}" 
