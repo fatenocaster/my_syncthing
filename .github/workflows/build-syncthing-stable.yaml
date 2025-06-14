@@ -86,13 +86,8 @@ jobs:
 
       - name: Build binary
         run: |
-          # 设置构建环境变量
-          export GOOS=${{ matrix.goos }}
-          export GOARCH=${{ matrix.goarch }}
-          export CGO_ENABLED=0
-          
-          # 构建
-          go run build.go build syncthing
+          # 构建 - 使用 -goos 和 -goarch 参数而不是环境变量
+          go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build syncthing
           
           # 重命名二进制文件
           if [ "${{ matrix.goos }}" = "windows" ]; then
@@ -225,7 +220,7 @@ jobs:
           # 构建多架构的二进制文件用于 Docker
           for arch in amd64 arm64 arm; do
             echo "Building for linux/$arch"
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go run build.go build syncthing
+            go run build.go -goos linux -goarch $arch build syncthing
             mv syncthing syncthing-linux-$arch
           done
 
