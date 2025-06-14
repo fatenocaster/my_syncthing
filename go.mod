@@ -1,6 +1,6 @@
 module github.com/syncthing/syncthing
 
-go 1.21.0
+go 1.23.0
 
 require (
 	github.com/AudriusButkevicius/recli v0.0.7-0.20220911121932-d000ce8fbf0f
@@ -41,7 +41,7 @@ require (
 	go.uber.org/automaxprocs v1.5.3
 	golang.org/x/crypto v0.21.0
 	golang.org/x/net v0.21.0
-	golang.org/x/sys v0.18.0
+	golang.org/x/sys v0.33.0
 	golang.org/x/text v0.14.0
 	golang.org/x/time v0.5.0
 	golang.org/x/tools v0.18.0
