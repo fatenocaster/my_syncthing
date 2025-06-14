@@ -1,6 +1,6 @@
 module github.com/syncthing/syncthing
 
-go 1.21.0
+go 1.22
 
 require (
 	github.com/AudriusButkevicius/recli v0.0.7-0.20220911121932-d000ce8fbf0f
@@ -45,7 +45,7 @@ require (
 	golang.org/x/text v0.14.0
 	golang.org/x/time v0.5.0
 	golang.org/x/tools v0.18.0
-	google.golang.org/protobuf v1.32.0
+	google.golang.org/protobuf v1.36.6
 )
 
 require (
