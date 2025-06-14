@@ -1,0 +1,254 @@
+name: Build Syncthing Stable Release
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Syncthing version tag (e.g., v1.27.0, leave empty for latest stable)'
+        required: false
+        default: ''
+  # 定时构建：每周日凌晨 2 点检查新版本
+  schedule:
+    - cron: '0 2 * * 0'
+  # 推送到主分支时触发
+  push:
+    branches: [ main, master ]
+
+env:
+  # Go 版本设置
+  GO_VERSION: "~1.22.0"
+  
+  # 优化兼容性设置
+  GO386: softfloat
+  GOARM: "5"
+  GOMIPS: softfloat
+  
+  # 构建元数据
+  BUILD_USER: builder
+  BUILD_HOST: github.actions
+
+jobs:
+  # 获取最新稳定版本
+  get-version:
+    name: Get Syncthing stable version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      need_build: ${{ steps.check_version.outputs.need_build }}
+    steps:
+      - name: Get latest stable version
+        id: get_version
+        run: |
+          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
+            VERSION="${{ github.event.inputs.version_tag }}"
+            echo "Using manual version: $VERSION"
+          else
+            # 获取最新的稳定版本（非预发布版本）
+            VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest | jq -r .tag_name)
+            echo "Latest stable version: $VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          
+      - name: Check if build is needed
+        id: check_version
+        run: |
+          # 检查是否已经构建过这个版本
+          VERSION="${{ steps.get_version.outputs.version }}"
+          
+          # 检查 releases 中是否已存在此版本
+          if curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION" | jq -e '.id' > /dev/null; then
+            echo "Version $VERSION already exists, skip build"
+            echo "need_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION not found, need build"
+            echo "need_build=true" >> $GITHUB_OUTPUT
+          fi
+
+  # 构建多平台版本
+  build-cross-platform:
+    name: Build cross platform
+    needs: get-version
+    if: needs.get-version.outputs.need_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux 平台
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: linux
+            goarch: arm
+            suffix: linux-arm
+          - goos: linux
+            goarch: 386
+            suffix: linux-386
+          # Windows 平台  
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+          - goos: windows
+            goarch: arm64
+            suffix: windows-arm64
+          - goos: windows
+            goarch: 386
+            suffix: windows-386
+          # macOS 平台
+          - goos: darwin
+            goarch: amd64
+            suffix: macos-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: macos-arm64
+          # FreeBSD 平台
+          - goos: freebsd
+            goarch: amd64
+            suffix: freebsd-amd64
+          - goos: freebsd
+            goarch: arm64
+            suffix: freebsd-arm64
+    
+    steps:
+      - name: Checkout Syncthing source
+        uses: actions/checkout@v4
+        with:
+          repository: syncthing/syncthing
+          ref: ${{ needs.get-version.outputs.version }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          check-latest: true
+
+      - name: Build binary
+        run: |
+          # 设置构建环境变量
+          export GOOS=${{ matrix.goos }}
+          export GOARCH=${{ matrix.goarch }}
+          export CGO_ENABLED=0
+          
+          # 构建
+          go run build.go build syncthing
+          
+          # 重命名二进制文件
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            mv syncthing.exe syncthing-${{ matrix.suffix }}.exe
+            BINARY_NAME="syncthing-${{ matrix.suffix }}.exe"
+          else
+            mv syncthing syncthing-${{ matrix.suffix }}
+            BINARY_NAME="syncthing-${{ matrix.suffix }}"
+          fi
+          
+          # 输出文件信息
+          ls -la $BINARY_NAME
+          echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: syncthing-${{ matrix.suffix }}
+          path: syncthing-${{ matrix.suffix }}*
+          retention-days: 7
+
+  # 创建 Release
+  create-release:
+    name: Create Release
+    needs: [get-version, build-cross-platform]
+    if: needs.get-version.outputs.need_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release-files
+          
+          # 移动所有构建文件到 release-files 目录
+          find artifacts -name "syncthing-*" -type f -exec cp {} release-files/ \;
+          
+          # 创建校验和文件
+          cd release-files
+          sha256sum syncthing-* > sha256sum.txt
+          ls -la
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.get-version.outputs.version }}
+          name: Syncthing ${{ needs.get-version.outputs.version }}
+          body: |
+            ## Syncthing ${{ needs.get-version.outputs.version }}
+            
+            这是基于官方 Syncthing ${{ needs.get-version.outputs.version }} 版本的自动构建。
+            
+            ### 支持的平台
+            - Linux (amd64, arm64, arm, 386)
+            - Windows (amd64, arm64, 386)  
+            - macOS (amd64, arm64)
+            - FreeBSD (amd64, arm64)
+            
+            ### 下载说明
+            - 下载对应您系统架构的二进制文件
+            - Linux/macOS 用户请给文件添加执行权限：`chmod +x syncthing-*`
+            - 校验文件完整性请参考 `sha256sum.txt`
+            
+            ### 源码
+            原始源码来自：https://github.com/syncthing/syncthing/releases/tag/${{ needs.get-version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: release-files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 构建 Docker 镜像（可选）
+  build-docker:
+    name: Build Docker Image
+    needs: [get-version, build-cross-platform]
+    if: needs.get-version.outputs.need_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Syncthing source
+        uses: actions/checkout@v4
+        with:
+          repository: syncthing/syncthing
+          ref: ${{ needs.get-version.outputs.version }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          check-latest: true
+
+      - name: Build for Docker (multi-arch)
+        run: |
+          # 构建多架构的二进制文件用于 Docker
+          for arch in amd64 arm64 arm; do
+            echo "Building for linux/$arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go run build.go build syncthing
+            mv syncthing syncthing-linux-$arch
+          done
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (local)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: false
+          tags: |
+            syncthing-custom:latest
+            syncthing-custom:${{ needs.get-version.outputs.version }} 
