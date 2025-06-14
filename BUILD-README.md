@@ -1,19 +1,21 @@
 # Syncthing 自定义构建
 
-这个仓库提供 Syncthing 的自动构建，支持多平台和多架构。
+这个仓库提供基于当前代码的 Syncthing 自定义构建，支持多平台和多架构。
 
 ## 特性
 
-- 🔄 自动获取最新稳定版本
+- 🔧 编译当前仓库代码（支持自定义修改）
 - 🏗️ 多平台构建（Linux、Windows、macOS、FreeBSD）
 - 📦 自动发布到 GitHub Releases
 - ✅ 文件完整性校验
+- 🏷️ 灵活的版本标签管理
 
 ## 使用方法
 
-1. 进入 Actions 页面手动触发构建
-2. 或等待每周自动构建
-3. 在 Releases 页面下载编译好的二进制文件
+1. 修改 Syncthing 源码（可选）
+2. 进入 Actions 页面手动触发构建
+3. 或推送代码到 main/master 分支自动构建
+4. 在 Releases 页面下载编译好的二进制文件
 
 ## 支持的平台
 
@@ -26,13 +28,12 @@
 
 ### 1. 手动触发
 - 进入 Actions 页面
-- 选择 "Build Syncthing Stable Release"
+- 选择 "Build Syncthing Custom"
 - 点击 "Run workflow"
-- 可选择指定版本或使用最新稳定版
+- 可选择指定自定义 release 标签名
 
 ### 2. 自动触发
-- **定时构建**: 每周日凌晨 2 点（UTC）
-- **代码推送**: 推送到 main/master 分支时
+- **代码推送**: 推送到 main/master 分支时自动构建
 
 ## 下载和使用
 

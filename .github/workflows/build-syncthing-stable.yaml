@@ -1,16 +1,13 @@
-name: Build Syncthing Stable Release
+name: Build Syncthing Custom
 
 on:
   # 手动触发
   workflow_dispatch:
     inputs:
-      version_tag:
-        description: 'Syncthing version tag (e.g., v1.27.0, leave empty for latest stable)'
+      release_tag:
+        description: 'Release tag name (e.g., v1.27.0-custom)'
         required: false
         default: ''
-  # 定时构建：每周日凌晨 2 点检查新版本
-  schedule:
-    - cron: '0 2 * * 0'
   # 推送到主分支时触发
   push:
     branches: [ main, master ]
@@ -29,47 +26,9 @@ env:
   BUILD_HOST: github.actions
 
 jobs:
-  # 获取最新稳定版本
-  get-version:
-    name: Get Syncthing stable version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
-      need_build: ${{ steps.check_version.outputs.need_build }}
-    steps:
-      - name: Get latest stable version
-        id: get_version
-        run: |
-          if [ -n "${{ github.event.inputs.version_tag }}" ]; then
-            VERSION="${{ github.event.inputs.version_tag }}"
-            echo "Using manual version: $VERSION"
-          else
-            # 获取最新的稳定版本（非预发布版本）
-            VERSION=$(curl -s https://api.github.com/repos/syncthing/syncthing/releases/latest | jq -r .tag_name)
-            echo "Latest stable version: $VERSION"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
-      - name: Check if build is needed
-        id: check_version
-        run: |
-          # 检查是否已经构建过这个版本
-          VERSION="${{ steps.get_version.outputs.version }}"
-          
-          # 检查 releases 中是否已存在此版本
-          if curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/$VERSION" | jq -e '.id' > /dev/null; then
-            echo "Version $VERSION already exists, skip build"
-            echo "need_build=false" >> $GITHUB_OUTPUT
-          else
-            echo "Version $VERSION not found, need build"
-            echo "need_build=true" >> $GITHUB_OUTPUT
-          fi
-
   # 构建多平台版本
   build-cross-platform:
     name: Build cross platform
-    needs: get-version
-    if: needs.get-version.outputs.need_build == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -113,11 +72,9 @@ jobs:
             suffix: freebsd-arm64
     
     steps:
-      - name: Checkout Syncthing source
+      - name: Checkout current source
         uses: actions/checkout@v4
         with:
-          repository: syncthing/syncthing
-          ref: ${{ needs.get-version.outputs.version }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -160,10 +117,41 @@ jobs:
   # 创建 Release
   create-release:
     name: Create Release
-    needs: [get-version, build-cross-platform]
-    if: needs.get-version.outputs.need_build == 'true'
+    needs: [build-cross-platform]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout current source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+          check-latest: true
+
+      - name: Get version info
+        id: version
+        run: |
+          # 获取当前代码的版本信息
+          VERSION=$(go run build.go version)
+          echo "Current version: $VERSION"
+          
+          # 如果手动指定了 release tag，使用指定的
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          else
+            # 使用当前版本加上时间戳
+            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+            RELEASE_TAG="$VERSION-$TIMESTAMP"
+          fi
+          
+          echo "Release tag: $RELEASE_TAG"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -184,12 +172,16 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.get-version.outputs.version }}
-          name: Syncthing ${{ needs.get-version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.release_tag }}
+          name: Syncthing Custom ${{ steps.version.outputs.release_tag }}
           body: |
-            ## Syncthing ${{ needs.get-version.outputs.version }}
+            ## Syncthing Custom Build ${{ steps.version.outputs.release_tag }}
             
-            这是基于官方 Syncthing ${{ needs.get-version.outputs.version }} 版本的自动构建。
+            这是基于当前代码的自定义构建版本。
+            
+            **基础版本**: ${{ steps.version.outputs.version }}  
+            **构建时间**: ${{ github.run_id }}  
+            **提交哈希**: ${{ github.sha }}
             
             ### 支持的平台
             - Linux (amd64, arm64, arm, 386)
@@ -203,9 +195,9 @@ jobs:
             - 校验文件完整性请参考 `sha256sum.txt`
             
             ### 源码
-            原始源码来自：https://github.com/syncthing/syncthing/releases/tag/${{ needs.get-version.outputs.version }}
+            基于提交: ${{ github.sha }}
           draft: false
-          prerelease: false
+          prerelease: true
           files: release-files/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -213,15 +205,12 @@ jobs:
   # 构建 Docker 镜像（可选）
   build-docker:
     name: Build Docker Image
-    needs: [get-version, build-cross-platform]
-    if: needs.get-version.outputs.need_build == 'true'
+    needs: [build-cross-platform]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Syncthing source
+      - name: Checkout current source
         uses: actions/checkout@v4
         with:
-          repository: syncthing/syncthing
-          ref: ${{ needs.get-version.outputs.version }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -251,4 +240,4 @@ jobs:
           push: false
           tags: |
             syncthing-custom:latest
-            syncthing-custom:${{ needs.get-version.outputs.version }} 
+            syncthing-custom:dev 
