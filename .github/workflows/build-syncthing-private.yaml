@@ -28,40 +28,22 @@ env:
   BUILD_HOST: github.actions
 
 jobs:
-  # 构建多平台版本
-  build-cross-platform:
-    name: Build ${{ matrix.suffix }}
+  # 构建主程序 syncthing
+  build-syncthing:
+    name: Build syncthing-${{ matrix.suffix }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          # Linux 平台
+          # Linux 64位
           - goos: linux
             goarch: amd64
             suffix: linux-amd64
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
-          - goos: linux
-            goarch: arm
-            suffix: linux-arm
-          - goos: linux
-            goarch: 386
-            suffix: linux-386
-          # Windows 平台
+          # Windows 64位
           - goos: windows
             goarch: amd64
             suffix: windows-amd64
-          - goos: windows
-            goarch: arm64
-            suffix: windows-arm64
-          - goos: windows
-            goarch: 386
-            suffix: windows-386
-          # macOS 平台
-          - goos: darwin
-            goarch: amd64
-            suffix: macos-amd64
+          # macOS M 系列（ARM64）
           - goos: darwin
             goarch: arm64
             suffix: macos-arm64
@@ -79,9 +61,9 @@ jobs:
           cache: true
           check-latest: true
 
-      - name: Build binary
+      - name: Build syncthing
         run: |
-          # 构建二进制文件
+          # 构建 syncthing
           go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build syncthing
 
           # 重命名二进制文件
@@ -98,17 +80,133 @@ jobs:
           file $BINARY_NAME || true
           echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
 
-      - name: Upload artifacts
+      - name: Upload syncthing artifact
         uses: actions/upload-artifact@v4
         with:
           name: syncthing-${{ matrix.suffix }}
           path: syncthing-${{ matrix.suffix }}*
           retention-days: 30
 
+  # 构建发现服务器 stdiscosrv
+  build-discovery:
+    name: Build stdiscosrv-${{ matrix.suffix }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux 64位
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          # Windows 64位
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+          # macOS M 系列（ARM64）
+          - goos: darwin
+            goarch: arm64
+            suffix: macos-arm64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          check-latest: true
+
+      - name: Build stdiscosrv
+        run: |
+          # 构建 stdiscosrv
+          go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build stdiscosrv
+
+          # 重命名二进制文件
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            mv stdiscosrv.exe stdiscosrv-${{ matrix.suffix }}.exe
+            BINARY_NAME="stdiscosrv-${{ matrix.suffix }}.exe"
+          else
+            mv stdiscosrv stdiscosrv-${{ matrix.suffix }}
+            BINARY_NAME="stdiscosrv-${{ matrix.suffix }}"
+          fi
+
+          # 输出文件信息
+          ls -lh $BINARY_NAME
+          file $BINARY_NAME || true
+
+      - name: Upload stdiscosrv artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdiscosrv-${{ matrix.suffix }}
+          path: stdiscosrv-${{ matrix.suffix }}*
+          retention-days: 30
+
+  # 构建中继服务器 strelaysrv
+  build-relay:
+    name: Build strelaysrv-${{ matrix.suffix }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux 64位
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          # Windows 64位
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64
+          # macOS M 系列（ARM64）
+          - goos: darwin
+            goarch: arm64
+            suffix: macos-arm64
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          check-latest: true
+
+      - name: Build strelaysrv
+        run: |
+          # 构建 strelaysrv
+          go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build strelaysrv
+
+          # 重命名二进制文件
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            mv strelaysrv.exe strelaysrv-${{ matrix.suffix }}.exe
+            BINARY_NAME="strelaysrv-${{ matrix.suffix }}.exe"
+          else
+            mv strelaysrv strelaysrv-${{ matrix.suffix }}
+            BINARY_NAME="strelaysrv-${{ matrix.suffix }}"
+          fi
+
+          # 输出文件信息
+          ls -lh $BINARY_NAME
+          file $BINARY_NAME || true
+
+      - name: Upload strelaysrv artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: strelaysrv-${{ matrix.suffix }}
+          path: strelaysrv-${{ matrix.suffix }}*
+          retention-days: 30
+
   # 创建 Release
   create-release:
     name: Create Release
-    needs: [build-cross-platform]
+    needs: [build-syncthing, build-discovery, build-relay]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
@@ -157,12 +255,15 @@ jobs:
           mkdir -p release-files
 
           # 移动所有构建文件到 release-files 目录
-          find artifacts -name "syncthing-*" -type f -exec cp {} release-files/ \;
+          find artifacts -type f \( -name "syncthing-*" -o -name "stdiscosrv-*" -o -name "strelaysrv-*" \) -exec cp {} release-files/ \;
 
           # 创建校验和文件
           cd release-files
-          sha256sum syncthing-* > sha256sum.txt
+          sha256sum * > sha256sum.txt
+
+          echo "=== Release Files ==="
           ls -lh
+          echo "==================="
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -186,10 +287,22 @@ jobs:
             - **构建时间**: ${{ github.run_id }}
             - **提交哈希**: ${{ github.sha }}
 
-            ### 支持的平台
-            - Linux (amd64, arm64, arm, 386)
-            - Windows (amd64, arm64, 386)
-            - macOS (amd64, arm64)
+            ### 包含的程序
+
+            #### 1. syncthing - 主同步程序
+            - `syncthing-linux-amd64` - Linux 64位
+            - `syncthing-windows-amd64.exe` - Windows 64位
+            - `syncthing-macos-arm64` - macOS M系列芯片
+
+            #### 2. stdiscosrv - 私有发现服务器
+            - `stdiscosrv-linux-amd64` - Linux 64位
+            - `stdiscosrv-windows-amd64.exe` - Windows 64位
+            - `stdiscosrv-macos-arm64` - macOS M系列芯片
+
+            #### 3. strelaysrv - 私有中继服务器
+            - `strelaysrv-linux-amd64` - Linux 64位
+            - `strelaysrv-windows-amd64.exe` - Windows 64位
+            - `strelaysrv-macos-arm64` - macOS M系列芯片
 
             ### 使用说明
 
@@ -197,26 +310,40 @@ jobs:
 
             **基本使用：**
             ```bash
-            # 直接运行（默认私有模式）
+            # 1. 运行主程序（默认私有模式）
             ./syncthing
 
-            # 临时启用 P2P 网络
+            # 2. 搭建私有发现服务器（可选）
+            ./stdiscosrv -listen :8443 -db-dir ./discovery.db
+
+            # 3. 搭建私有中继服务器（可选）
+            ./strelaysrv -listen :22067
+            ```
+
+            **启用 P2P 网络（可选）：**
+            ```bash
             ./syncthing serve --no-p2p=false
             ```
 
             ### 下载说明
-            1. 下载对应您系统架构的二进制文件
-            2. Linux/macOS 用户添加执行权限：`chmod +x syncthing-*`
+            1. 下载对应您系统的二进制文件
+            2. Linux/macOS 用户添加执行权限：`chmod +x <文件名>`
             3. 验证文件完整性：参考 `sha256sum.txt`
+
+            ### 支持的平台
+            - **Linux**: amd64 (x86_64)
+            - **Windows**: amd64 (x86_64)
+            - **macOS**: arm64 (Apple Silicon M1/M2/M3/M4)
 
             ### 注意事项
             ⚠️ 默认模式下设备需要手动配置连接地址
             ⚠️ 不会自动发现局域网内的其他设备
             ⚠️ 不会通过公共中继服务器转发数据
+            ✅ 可搭建私有发现和中继服务器实现内网穿透
 
             ---
 
-            基于提交: ${{ github.sha }}
+            **基于提交**: ${{ github.sha }}
           draft: false
           prerelease: false
           files: release-files/*
