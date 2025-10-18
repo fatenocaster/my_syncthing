@@ -1,34 +1,36 @@
-name: Build Syncthing Custom
+name: Build Syncthing Private Mode
 
 on:
   # 手动触发
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag name (e.g., v1.27.0-custom)'
+        description: 'Release tag name (e.g., v1.0.0-private)'
         required: false
         default: ''
-  # 推送到主分支时触发
+  # 推送到 private 分支时触发
   push:
-    branches: [ main, master ]
+    branches: [ private ]
+    tags:
+      - 'v*-private'
 
 env:
   # Go 版本设置
   GO_VERSION: "~1.22.0"
-  
+
   # 优化兼容性设置
   GO386: softfloat
   GOARM: "5"
   GOMIPS: softfloat
-  
+
   # 构建元数据
-  BUILD_USER: builder
+  BUILD_USER: fatenocaster
   BUILD_HOST: github.actions
 
 jobs:
   # 构建多平台版本
   build-cross-platform:
-    name: Build cross platform
+    name: Build ${{ matrix.suffix }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -46,7 +48,7 @@ jobs:
           - goos: linux
             goarch: 386
             suffix: linux-386
-          # Windows 平台  
+          # Windows 平台
           - goos: windows
             goarch: amd64
             suffix: windows-amd64
@@ -63,16 +65,9 @@ jobs:
           - goos: darwin
             goarch: arm64
             suffix: macos-arm64
-          # FreeBSD 平台
-          - goos: freebsd
-            goarch: amd64
-            suffix: freebsd-amd64
-          - goos: freebsd
-            goarch: arm64
-            suffix: freebsd-arm64
-    
+
     steps:
-      - name: Checkout current source
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -86,9 +81,9 @@ jobs:
 
       - name: Build binary
         run: |
-          # 构建 - 使用 -goos 和 -goarch 参数而不是环境变量
+          # 构建二进制文件
           go run build.go -goos ${{ matrix.goos }} -goarch ${{ matrix.goarch }} build syncthing
-          
+
           # 重命名二进制文件
           if [ "${{ matrix.goos }}" = "windows" ]; then
             mv syncthing.exe syncthing-${{ matrix.suffix }}.exe
@@ -97,9 +92,10 @@ jobs:
             mv syncthing syncthing-${{ matrix.suffix }}
             BINARY_NAME="syncthing-${{ matrix.suffix }}"
           fi
-          
+
           # 输出文件信息
-          ls -la $BINARY_NAME
+          ls -lh $BINARY_NAME
+          file $BINARY_NAME || true
           echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
 
       - name: Upload artifacts
@@ -107,19 +103,20 @@ jobs:
         with:
           name: syncthing-${{ matrix.suffix }}
           path: syncthing-${{ matrix.suffix }}*
-          retention-days: 7
+          retention-days: 30
 
   # 创建 Release
   create-release:
     name: Create Release
     needs: [build-cross-platform]
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
-      - name: Checkout current source
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -133,16 +130,19 @@ jobs:
           # 获取当前代码的版本信息
           VERSION=$(go run build.go version)
           echo "Current version: $VERSION"
-          
+
           # 如果手动指定了 release tag，使用指定的
           if [ -n "${{ github.event.inputs.release_tag }}" ]; then
             RELEASE_TAG="${{ github.event.inputs.release_tag }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # 如果是 tag 触发，使用 tag 名称
+            RELEASE_TAG="${{ github.ref_name }}"
           else
             # 使用当前版本加上时间戳
             TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            RELEASE_TAG="$VERSION-$TIMESTAMP"
+            RELEASE_TAG="$VERSION-private-$TIMESTAMP"
           fi
-          
+
           echo "Release tag: $RELEASE_TAG"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
@@ -155,84 +155,70 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release-files
-          
+
           # 移动所有构建文件到 release-files 目录
           find artifacts -name "syncthing-*" -type f -exec cp {} release-files/ \;
-          
+
           # 创建校验和文件
           cd release-files
           sha256sum syncthing-* > sha256sum.txt
-          ls -la
+          ls -lh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.release_tag }}
-          name: Syncthing Custom ${{ steps.version.outputs.release_tag }}
+          name: Syncthing Private Mode ${{ steps.version.outputs.release_tag }}
           body: |
-            ## Syncthing Custom Build ${{ steps.version.outputs.release_tag }}
-            
-            这是基于当前代码的自定义构建版本。
-            
-            **基础版本**: ${{ steps.version.outputs.version }}  
-            **构建时间**: ${{ github.run_id }}  
-            **提交哈希**: ${{ github.sha }}
-            
+            ## Syncthing 私有模式 ${{ steps.version.outputs.release_tag }}
+
+            这是 Syncthing 的私有模式版本，默认不加入公共 P2P 网络。
+
+            ### 主要特性
+            ✅ 默认禁用自动升级
+            ✅ 默认禁用全局发现服务器
+            ✅ 默认禁用本地发现广播
+            ✅ 默认禁用中继服务器
+            ✅ 完全网络隔离，保护隐私
+
+            ### 版本信息
+            - **基础版本**: ${{ steps.version.outputs.version }}
+            - **构建时间**: ${{ github.run_id }}
+            - **提交哈希**: ${{ github.sha }}
+
             ### 支持的平台
             - Linux (amd64, arm64, arm, 386)
-            - Windows (amd64, arm64, 386)  
+            - Windows (amd64, arm64, 386)
             - macOS (amd64, arm64)
-            - FreeBSD (amd64, arm64)
-            
+
+            ### 使用说明
+
+            详细使用说明请查看仓库中的 `PRIVATE_MODE_USAGE.md` 文件。
+
+            **基本使用：**
+            ```bash
+            # 直接运行（默认私有模式）
+            ./syncthing
+
+            # 临时启用 P2P 网络
+            ./syncthing serve --no-p2p=false
+            ```
+
             ### 下载说明
-            - 下载对应您系统架构的二进制文件
-            - Linux/macOS 用户请给文件添加执行权限：`chmod +x syncthing-*`
-            - 校验文件完整性请参考 `sha256sum.txt`
-            
-            ### 源码
+            1. 下载对应您系统架构的二进制文件
+            2. Linux/macOS 用户添加执行权限：`chmod +x syncthing-*`
+            3. 验证文件完整性：参考 `sha256sum.txt`
+
+            ### 注意事项
+            ⚠️ 默认模式下设备需要手动配置连接地址
+            ⚠️ 不会自动发现局域网内的其他设备
+            ⚠️ 不会通过公共中继服务器转发数据
+
+            ---
+
             基于提交: ${{ github.sha }}
           draft: false
-          prerelease: true
+          prerelease: false
           files: release-files/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # 构建 Docker 镜像（可选）
-  build-docker:
-    name: Build Docker Image
-    needs: [build-cross-platform]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout current source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-          check-latest: true
-
-      - name: Build for Docker (multi-arch)
-        run: |
-          # 构建多架构的二进制文件用于 Docker
-          for arch in amd64 arm64 arm; do
-            echo "Building for linux/$arch"
-            go run build.go -goos linux -goarch $arch build syncthing
-            mv syncthing syncthing-linux-$arch
-          done
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image (local)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
-          push: false
-          tags: |
-            syncthing-custom:latest
-            syncthing-custom:dev 
