@@ -138,6 +138,11 @@ func main() {
 	}
 
 	log.Println(longVer)
+	log.Println("=======================================================")
+	log.Println("Relay Server is starting")
+	log.Println("WARNING: This server is NOT joining the public P2P network")
+	log.Println("It will only serve local/private relay requests")
+	log.Println("=======================================================")
 
 	maxDescriptors, err := osutil.MaximizeOpenFileLimit()
 	if maxDescriptors > 0 {

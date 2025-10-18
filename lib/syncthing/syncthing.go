@@ -56,6 +56,7 @@ const (
 type Options struct {
 	AuditWriter    io.Writer
 	NoUpgrade      bool
+	NoP2P          bool
 	ProfilerAddr   string
 	ResetDeltaIdxs bool
 	Verbose        bool
@@ -267,6 +268,29 @@ func (a *App) startup() error {
 	tlsCfg.ClientAuth = tls.RequestClientCert
 	tlsCfg.SessionTicketsDisabled = true
 	tlsCfg.InsecureSkipVerify = true
+
+	// Apply NoP2P configuration if enabled
+	if a.opts.NoP2P {
+		l.Infoln("P2P network is disabled (discovery and relay servers will not be used)")
+		a.cfg.Modify(func(cfg *config.Configuration) {
+			// Clear global discovery servers
+			cfg.Options.RawGlobalAnnServers = []string{}
+			// Remove relay servers from listen addresses
+			var newListenAddrs []string
+			for _, addr := range cfg.Options.RawListenAddresses {
+				if !strings.Contains(addr, "relay") && !strings.Contains(addr, "dynamic+") {
+					newListenAddrs = append(newListenAddrs, addr)
+				}
+			}
+			cfg.Options.RawListenAddresses = newListenAddrs
+			// Disable local discovery
+			cfg.Options.LocalAnnEnabled = false
+			// Disable global discovery
+			cfg.Options.GlobalAnnEnabled = false
+			// Disable relays
+			cfg.Options.RelaysEnabled = false
+		})
+	}
 
 	// Start discovery and connection management
 

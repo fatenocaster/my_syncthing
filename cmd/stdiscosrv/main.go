@@ -100,6 +100,11 @@ func main() {
 	flag.Parse()
 
 	log.Println(build.LongVersionFor("stdiscosrv"))
+	log.Println("=======================================================")
+	log.Println("Discovery Server is starting")
+	log.Println("WARNING: This server is NOT joining the public P2P network")
+	log.Println("It will only serve local/private discovery requests")
+	log.Println("=======================================================")
 	if *showVersion {
 		return
 	}

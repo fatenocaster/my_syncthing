@@ -9,15 +9,15 @@ import "ext.proto";
 
 message OptionsConfiguration {
     repeated string listen_addresses                         = 1 [(ext.goname) = "RawListenAddresses", (ext.default) = "default"];
-    repeated string global_discovery_servers                 = 2 [(ext.goname) = "RawGlobalAnnServers", (ext.xml) = "globalAnnounceServer", (ext.json) = "globalAnnounceServers", (ext.default) = "default"];
-    bool            global_discovery_enabled                 = 3 [(ext.goname) = "GlobalAnnEnabled", (ext.xml) = "globalAnnounceEnabled", (ext.json) = "globalAnnounceEnabled", (ext.default) = "true"];
-    bool            local_discovery_enabled                  = 4 [(ext.goname) = "LocalAnnEnabled", (ext.xml) = "localAnnounceEnabled", (ext.json) = "localAnnounceEnabled", (ext.default) = "true"];
+    repeated string global_discovery_servers                 = 2 [(ext.goname) = "RawGlobalAnnServers", (ext.xml) = "globalAnnounceServer", (ext.json) = "globalAnnounceServers"];
+    bool            global_discovery_enabled                 = 3 [(ext.goname) = "GlobalAnnEnabled", (ext.xml) = "globalAnnounceEnabled", (ext.json) = "globalAnnounceEnabled", (ext.default) = "false"];
+    bool            local_discovery_enabled                  = 4 [(ext.goname) = "LocalAnnEnabled", (ext.xml) = "localAnnounceEnabled", (ext.json) = "localAnnounceEnabled", (ext.default) = "false"];
     int32           local_announce_port                      = 5 [(ext.goname) = "LocalAnnPort", (ext.xml) = "localAnnouncePort", (ext.json) = "localAnnouncePort", (ext.default) = "21027"];
     string          local_announce_multicast_address         = 6 [(ext.goname) = "LocalAnnMCAddr", (ext.xml) = "localAnnounceMCAddr", (ext.json) = "localAnnounceMCAddr", (ext.default) = "[ff12::8384]:21027"];
     int32           max_send_kbps                            = 7;
     int32           max_recv_kbps                            = 8;
     int32           reconnection_interval_s                  = 9 [(ext.goname) = "ReconnectIntervalS", (ext.default) = "60"];
-    bool            relays_enabled                           = 10 [(ext.default) = "true"];
+    bool            relays_enabled                           = 10 [(ext.default) = "false"];
     int32           relays_reconnect_interval_m              = 11 [(ext.goname) = "RelayReconnectIntervalM", (ext.xml) = "relayReconnectIntervalM", (ext.json) = "relayReconnectIntervalM", (ext.default) = "10"];
     bool            start_browser                            = 12 [(ext.default) = "true"];
     bool            nat_traversal_enabled                    = 14 [(ext.goname) = "NATEnabled", (ext.xml) = "natEnabled", (ext.json) = "natEnabled", (ext.default) = "true"];
@@ -30,7 +30,7 @@ message OptionsConfiguration {
     string          usage_reporting_url                      = 21 [(ext.goname) = "URURL", (ext.xml) = "urURL", (ext.json) = "urURL", (ext.default) = "https://data.syncthing.net/newdata"];
     bool            usage_reporting_post_insecurely          = 22 [(ext.goname) = "URPostInsecurely", (ext.xml) = "urPostInsecurely", (ext.json) = "urPostInsecurely", (ext.default) = "false"];
     int32           usage_reporting_initial_delay_s          = 23 [(ext.goname) = "URInitialDelayS", (ext.xml) = "urInitialDelayS", (ext.json) = "urInitialDelayS", (ext.default) = "1800"];
-    int32           auto_upgrade_interval_h                  = 25 [(ext.default) = "12"];
+    int32           auto_upgrade_interval_h                  = 25 [(ext.default) = "0"];
     bool            upgrade_to_pre_releases                  = 26;
     int32           keep_temporaries_h                       = 27 [(ext.default) = "24"];
     bool            cache_ignored_files                      = 28 [(ext.default) = "false"];

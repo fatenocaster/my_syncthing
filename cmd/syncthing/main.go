@@ -159,7 +159,8 @@ type serveOptions struct {
 	LogMaxSize       int    `placeholder:"BYTES" default:"${logMaxSize}" help:"Maximum size of any file (zero to disable log rotation)"`
 	NoBrowser        bool   `help:"Do not start browser"`
 	NoRestart        bool   `env:"STNORESTART" help:"Do not restart Syncthing when exiting due to API/GUI command, upgrade, or crash"`
-	NoUpgrade        bool   `env:"STNOUPGRADE" help:"Disable automatic upgrades"`
+	NoUpgrade        bool   `env:"STNOUPGRADE" help:"Disable automatic upgrades" default:"true"`
+	NoP2P            bool   `help:"Do not join P2P network (disable discovery and relay servers)" default:"true"`
 	Paths            bool   `help:"Show configuration paths"`
 	Paused           bool   `help:"Start with all devices and folders paused"`
 	Unpaused         bool   `help:"Start with all devices and folders unpaused"`
@@ -623,6 +624,7 @@ func syncthingMain(options serveOptions) {
 
 	appOpts := syncthing.Options{
 		NoUpgrade:            options.NoUpgrade,
+		NoP2P:                options.NoP2P,
 		ProfilerAddr:         options.DebugProfilerListen,
 		ResetDeltaIdxs:       options.DebugResetDeltaIdxs,
 		Verbose:              options.Verbose,
