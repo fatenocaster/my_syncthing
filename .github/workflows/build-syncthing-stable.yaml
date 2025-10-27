@@ -103,7 +103,7 @@ jobs:
           echo "BINARY_NAME=$BINARY_NAME" >> $GITHUB_ENV
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: syncthing-${{ matrix.suffix }}
           path: syncthing-${{ matrix.suffix }}*
